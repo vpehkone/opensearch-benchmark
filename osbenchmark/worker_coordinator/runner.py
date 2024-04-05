@@ -41,6 +41,7 @@ from typing import List, Optional
 
 import ijson
 from opensearchpy import ConnectionTimeout
+from opensearchpy import NotFoundError
 
 from osbenchmark import exceptions, workload
 from osbenchmark.utils import convert
@@ -1285,8 +1286,8 @@ class DeletePipeline(Runner):
                                                     master_timeout=params.get("master-timeout"),
                                                     timeout=params.get("timeout"),
                                                     )
-        except:
-            pass # no current pipeline
+        except NotFoundError as e:
+            self.logger.info("No current pipeline [%s] to delete.", params.get("id"))
 
     def __repr__(self, *args, **kwargs):
         return "delete-pipeline"
@@ -2389,20 +2390,18 @@ class DeleteMlModel(Runner):
                     }
                 }
             },
-            "size": 1000
+            "size": params.get('number-of-hits-to-return', 1000)
         }
 
         model_ids = set()
-        try:
-            resp = await opensearch.transport.perform_request('POST', '/_plugins/_ml/models/_search', body=body)
-            for item in resp['hits']['hits']:
-                doc = item.get('_source')
-                if doc:
-                    id = doc.get('model_id')
-                    if id:
-                        model_ids.add(id)
-        except:
-            pass # no current model
+
+        resp = await opensearch.transport.perform_request('POST', '/_plugins/_ml/models/_search', body=body)
+        for item in resp['hits']['hits']:
+            doc = item.get('_source')
+            if doc:
+                id = doc.get('model_id')
+                if id:
+                    model_ids.add(id)
 
         for model_id in model_ids:
             resp=await opensearch.transport.perform_request('POST', '/_plugins/_ml/models/' + model_id + '/_undeploy')
@@ -2429,20 +2428,17 @@ class RegisterMlModel(Runner):
                 "match": {
                     "name": body['name']
                 }
-            },
-            "size": 1000
+            }
         }
         model_id = None
-        try:
-            resp = await opensearch.transport.perform_request('POST', '/_plugins/_ml/models/_search', body=search_body)
-            for item in resp['hits']['hits']:
-                doc = item.get('_source')
-                if doc:
-                    model_id = doc.get('model_id')
-                    if model_id:
-                        break
-        except:
-            pass
+
+        resp = await opensearch.transport.perform_request('POST', '/_plugins/_ml/models/_search', body=search_body)
+        for item in resp['hits']['hits']:
+            doc = item.get('_source')
+            if doc:
+                model_id = doc.get('model_id')
+                if model_id:
+                    break
 
         if not model_id:
             resp = await opensearch.transport.perform_request('POST', '_plugins/_ml/models/_register', body=body)
