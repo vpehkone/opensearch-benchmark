@@ -2403,10 +2403,7 @@ class DeleteMlModel(Runner):
         async def _is_deployed(model_id):
             resp = await opensearch.transport.perform_request('GET', '_plugins/_ml/models/' + model_id)
             state = resp.get('model_state')
-            if state == 'PARTIALLY_DEPLOYED' or state == 'DEPLOYED':
-                return True
-            else:
-                return False
+            return state in ('PARTIALLY_DEPLOYED', 'DEPLOYED')
 
         body= {
             "query": {
@@ -2430,14 +2427,11 @@ class DeleteMlModel(Runner):
                     model_ids.add(id)
 
         for model_id in model_ids:
-            deployed = await _is_deployed(model_id)
-            if deployed:
-                await opensearch.transport.perform_request('POST', '/_plugins/_ml/models/' + model_id + '/_undeploy')
-                while deployed:
-                    time.sleep(1)
-                    resp = await opensearch.transport.perform_request('GET', '_plugins/_ml/models/' + model_id)
-                    deployed = await _is_deployed(model_id)
+            await opensearch.transport.perform_request('POST', '/_plugins/_ml/models/' + model_id + '/_undeploy')
 
+        for model_id in model_ids:
+            while await _is_deployed(model_id):
+                await asyncio.sleep(1)
             await opensearch.transport.perform_request('DELETE', '/_plugins/_ml/models/' + model_id)
 
     def __repr__(self, *args, **kwargs):
