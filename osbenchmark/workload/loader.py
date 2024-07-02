@@ -490,7 +490,7 @@ class Downloader:
                 self.logger.info("Downloading data from [%s] to [%s].", data_url, target_path)
 
             # we want to have a bit more accurate download progress as these files are typically very large
-            progress = net.Progress("[INFO] Downloading workload data: " + os.path.basename(target_path),
+            progress = net.Progress("[INFO] Downloading workload data file: " + os.path.basename(target_path),
                                     accuracy=1)
             net.download(data_url, target_path, size_in_bytes, progress_indicator=progress)
             progress.finish()
@@ -532,9 +532,9 @@ class DocumentSetPreparator:
     def has_expected_size(self, file_name, expected_size):
         return expected_size is None or os.path.getsize(file_name) == expected_size
 
-    def create_file_offset_table(self, document_file_path, expected_number_of_lines):
+    def create_file_offset_table(self, document_file_path, base_url, source_url, expected_number_of_lines):
         # just rebuild the file every time for the time being. Later on, we might check the data file fingerprint to avoid it
-        lines_read = io.prepare_file_offset_table(document_file_path)
+        lines_read = io.prepare_file_offset_table(document_file_path, base_url, source_url, self.downloader)
         if lines_read and lines_read != expected_number_of_lines:
             io.remove_file_offset_table(document_file_path)
             raise exceptions.DataError(f"Data in [{document_file_path}] for workload [{self.workload_name}] are invalid. "
@@ -588,13 +588,7 @@ class DocumentSetPreparator:
                     else:
                         raise
         if document_set.support_file_offset_table:
-            if not document_set.source_url:
-                try:
-                    self.downloader.download(document_set.base_url, None, doc_path + '.offset', None)
-                except exceptions.DataError as e:
-                    if isinstance(e.cause, urllib.error.HTTPError) and (e.cause.code == 403 or e.cause.code == 404):
-                        self.logger.info("Pre-generated offset file not found, will generate from corpus data")
-            self.create_file_offset_table(doc_path, document_set.number_of_lines)
+            self.create_file_offset_table(doc_path, document_set.base_url, document_set.source_url, document_set.number_of_lines)
 
     def prepare_bundled_document_set(self, document_set, data_root):
         """
@@ -621,7 +615,7 @@ class DocumentSetPreparator:
         while True:
             if self.is_locally_available(doc_path):
                 if self.has_expected_size(doc_path, document_set.uncompressed_size_in_bytes):
-                    self.create_file_offset_table(doc_path, document_set.number_of_lines)
+                    self.create_file_offset_table(doc_path, document_set.base_url, document_set.source_url, document_set.number_of_lines)
                     return True
                 else:
                     raise exceptions.DataError(f"[{doc_path}] is present but does not have the expected size "
@@ -935,12 +929,13 @@ class TestModeWorkloadProcessor(WorkloadProcessor):
 class QueryRandomizerWorkloadProcessor(WorkloadProcessor):
     DEFAULT_RF = 0.3
     DEFAULT_N = 5000
+    DEFAULT_ALPHA = 1
     def __init__(self, cfg):
         self.randomization_enabled = cfg.opts("workload", "randomization.enabled", mandatory=False, default_value=False)
         self.rf = float(cfg.opts("workload", "randomization.repeat_frequency", mandatory=False, default_value=self.DEFAULT_RF))
         self.logger = logging.getLogger(__name__)
         self.N = int(cfg.opts("workload", "randomization.n", mandatory=False, default_value=self.DEFAULT_N))
-        self.zipf_alpha = 1
+        self.zipf_alpha = float(cfg.opts("workload", "randomization.alpha", mandatory=False, default_value=self.DEFAULT_ALPHA))
         self.H_list = self.precompute_H(self.N, self.zipf_alpha)
 
     # Helper functions for computing Zipf distribution
